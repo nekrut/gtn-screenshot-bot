@@ -1,0 +1,424 @@
+# Full tutorial configuration for galaxy-intro-ngs-data-managment
+# This generates a complete tutorial.md with screenshots and AI-generated explanations
+# Uses GTN markdown format: https://training.galaxyproject.org/training-material/topics/contributing/tutorials/create-new-tutorial-content/tutorial.html
+
+metadata:
+  title: "NGS data logistics"
+  zenodo_link: https://zenodo.org/records/15354240
+  questions:
+    - "How to manipulate and process NGS data"
+  objectives:
+    - "Understand most common types of NGS-related datatypes"
+    - "Learn about how Galaxy handles NGS data using Illumina data derived from patients infected with Plasmodium"
+  level: Introductory
+  time_estimation: "1H30M"
+  subtopic: next-steps
+  contributions:
+    authorship:
+      - nekrut
+      - mvdbeek
+      - tnabtaf
+      - blankenberg
+    editing:
+      - dadrasarmin
+
+  # Abbreviations - auto-expand on first use with {ABBREV} syntax in text
+  abbreviations:
+    NGS: Next-Generation Sequencing
+    QC: Quality Control
+    BAM: Binary Alignment Map
+    VCF: Variant Call Format
+    SNV: Single Nucleotide Variant
+
+galaxy:
+  url: https://usegalaxy.org
+  # credentials:
+  #   username: your_username
+  #   password: your_password
+
+ai:
+  provider: anthropic
+  generate_explanations: true
+  generate_details_blocks: true
+  generate_key_points: true
+
+output:
+  tutorial_dir: ./output/galaxy-intro-ngs-data-managment
+  images_dir: ./output/galaxy-intro-ngs-data-managment/images
+
+sections:
+  # ==========================================
+  # Introduction
+  # ==========================================
+  - id: intro
+    title: "Introduction"
+    level: 1
+    type: intro
+    content:
+      - type: text
+        text: "In this tutorial, we will look at practical aspects of manipulation of next-generation sequencing data. We will start with the FASTQ format produced by most sequencing machines and will finish with a table of variants present in four human samples we will analyze."
+
+  - id: the-story
+    title: "The Story"
+    level: 1
+    type: intro
+    content:
+      - type: text
+        text: |
+          To make this tutorial as realistic as possible we wanted to use an example from the real world. We will start with four sequencing datasets (fastq files) representing four individuals positive for malaria---a life-threatening disease caused by *Plasmodium* parasites---transmitted to humans through the bites of infected female *Anopheles* mosquitoes.
+
+          Our goal is to understand whether the malaria parasite (*Plasmodium falciparum*) infecting these individuals is resistant to Pyrimethamine---an antimalarial drug. Resistance to Pyrimethamine is conferred by a mutation in `PF3D7_0417200` (*dhfr*) gene. Given sequencing data from four individuals we will determine which one of them is infected with a *Plasmodium falciparum* carrying mutations in this gene.
+      - type: table
+        headers: ["Accession", "Location"]
+        rows:
+          - ["ERR636434", "Ivory coast"]
+          - ["ERR636028", "Ivory coast"]
+          - ["ERR042232", "Colombia"]
+          - ["ERR042228", "Colombia"]
+
+  # ==========================================
+  # Upload data
+  # ==========================================
+  - id: upload-data
+    title: "Upload data into Galaxy"
+    level: 2
+    type: hands_on
+    details_blocks:
+      - title: "What is fastq data?"
+        generate: true
+        topic: "FASTQ file format including quality scores, paired-end data, and interleaved files"
+    steps:
+      - type: instruction
+        text: "Go to your Galaxy instance of choice such as one of the UseGalaxy.* instances"
+      - type: instruction
+        text: "Click *Upload Data* button"
+      - type: screenshot
+        screenshot:
+          filename: upload_button.png
+          selector: '[data-description="upload button"], .upload-button'
+      - type: instruction
+        text: 'In the dialog box that would appear click "*Paste/Fetch*" button'
+      - type: instruction
+        text: |
+          Paste the following URLs into the box:
+          ```
+          https://zenodo.org/records/15354240/files/ERR042228_F.fq.gz
+          https://zenodo.org/records/15354240/files/ERR042228_R.fq.gz
+          https://zenodo.org/records/15354240/files/ERR042232_F.fq.gz
+          https://zenodo.org/records/15354240/files/ERR042232_R.fq.gz
+          https://zenodo.org/records/15354240/files/ERR636028_F.fq.gz
+          https://zenodo.org/records/15354240/files/ERR636028_R.fq.gz
+          https://zenodo.org/records/15354240/files/ERR636434_F.fq.gz
+          https://zenodo.org/records/15354240/files/ERR636434_R.fq.gz
+          ```
+      - type: instruction
+        text: "Change datatype to `fastqsanger.gz`"
+      - type: screenshot
+        screenshot:
+          filename: upload_name_datatype.png
+          selector: ".upload-dialog"
+          annotations:
+            - type: box
+              selector: '[data-description="extension selector"]'
+              color: green
+      - type: instruction
+        text: "Click *Start* button, then close dialog"
+
+  # ==========================================
+  # Create collection
+  # ==========================================
+  - id: create-collection
+    title: "Bundle data into Collection"
+    level: 2
+    type: hands_on
+    content:
+      - type: text
+        text: "We are going to perform exactly the same analysis on all four samples. So it does not make sense to repeat the same operation eight times. We will bundle the datasets into a *Collection*."
+    steps:
+      - type: instruction
+        text: "Select all eight datasets in your history"
+      - type: instruction
+        text: "Click the checkbox icon and select 'Build List of Dataset Pairs'"
+      - type: instruction
+        text: "Configure the pairing using _F and _R suffixes"
+      - type: screenshot
+        screenshot:
+          filename: paired_collection.png
+          selector: ".collection-creator"
+
+  # ==========================================
+  # Run fastp
+  # ==========================================
+  - id: run-fastp
+    title: "Assessing the quality of the data with fastp and multiqc"
+    level: 2
+    type: hands_on
+    content:
+      - type: text
+        text: "Raw fastq data is often contaminated with fragments of sequencing adapters and contain low quality reads. fastp can automatically detect widely used sequencing adapters and remove them."
+    steps:
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0+galaxy4
+          name: fastp
+          params:
+            - label: "Single-end or paired reads"
+              value: "Paired collection"
+              icon: param-select
+              annotation:
+                color: red
+                type: outline
+            - label: "Select paired collection(s)"
+              value: "The collection we created"
+              icon: param-files
+              annotation:
+                color: red
+                type: arrow
+          screenshot:
+            filename: fastp.png
+            selector: ".tool-form"
+            annotations:
+              - type: box
+                selector: '[data-label*="Single-end"]'
+                color: red
+          output_description: "Fastp generates cleaned data as well as HTML and JSON reports."
+      # Example question box after tool step
+      - type: note
+        note:
+          type: question
+          title: "Check your understanding"
+          text: "What does fastp do with adapter sequences it detects?"
+
+  # ==========================================
+  # Run MultiQC
+  # ==========================================
+  - id: run-multiqc
+    title: "Running MultiQC"
+    level: 3
+    type: hands_on
+    steps:
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/multiqc/multiqc/1.27+galaxy3
+          name: MultiQC
+          params:
+            - label: "Which tool was used to generate logs?"
+              value: "fastp"
+              annotation:
+                color: red
+                type: outline
+            - label: "Output of fastp"
+              value: "JSON output from fastp"
+              annotation:
+                color: red
+                type: arrow
+          screenshot:
+            filename: multiqc.png
+            selector: ".tool-form"
+
+  # ==========================================
+  # Map reads
+  # ==========================================
+  - id: map-reads
+    title: "Mapping reads"
+    level: 2
+    type: hands_on
+    details_blocks:
+      - title: "What are BAM files?"
+        generate: true
+        topic: "SAM/BAM file format, CIGAR strings, FLAG field, and read groups"
+    content:
+      - type: text
+        text: "We can proceed with mapping reads using BWA-MEM2---the latest version of this popular and battle-tested tool."
+    steps:
+      - type: instruction
+        text: "First upload the reference genome from Zenodo"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/bwa_mem2/bwa_mem2/2.2.1+galaxy4
+          name: BWA-MEM2
+          params:
+            - label: "Will you select a reference genome from your history or use a built-in index?"
+              value: "Use a reference genome from history"
+              annotation:
+                color: red
+                type: outline
+            - label: "Single or Paired-end reads"
+              value: "Paired collection"
+              annotation:
+                color: green
+                type: outline
+          screenshot:
+            filename: bwamem2.png
+            selector: ".tool-form"
+
+  # ==========================================
+  # Remove duplicates
+  # ==========================================
+  - id: remove-duplicates
+    title: "Remove duplicates"
+    level: 3
+    type: hands_on
+    details_blocks:
+      - title: "What are read duplicates?"
+        generate: true
+        topic: "PCR duplicates and sampling coincidence duplicates in NGS data"
+    steps:
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/devteam/picard/picard_MarkDuplicates/3.1.1.0
+          name: MarkDuplicates
+          params:
+            - label: "Select SAM/BAM dataset or dataset collection"
+              value: "Output of BWA-MEM2"
+              annotation:
+                color: red
+                type: arrow
+            - label: "If true do not write duplicates to the output file"
+              value: "Yes"
+              annotation:
+                color: green
+                type: arrow
+          screenshot:
+            filename: markdups.png
+            selector: ".tool-form"
+
+  # ==========================================
+  # Call variants
+  # ==========================================
+  - id: call-variants
+    title: "Calling variants"
+    level: 2
+    type: hands_on
+    content:
+      - type: text
+        text: "We are now ready to proceed with variant calling using lofreq, which is specifically designed for calling variants in haploid organisms."
+    steps:
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/lofreq_viterbi/lofreq_viterbi/2.1.5+galaxy0
+          name: Realign reads
+          params:
+            - label: "Reads to realign"
+              value: "Output of MarkDuplicates"
+            - label: "Reference"
+              value: "Reference genome from history"
+          screenshot:
+            filename: realign_lofreq.png
+            selector: ".tool-form"
+
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/lofreq_call/lofreq_call/2.1.5+galaxy3
+          name: Call variants
+          params:
+            - label: "Input reads in BAM format"
+              value: "Output of Realign reads"
+            - label: "Types of variants to call"
+              value: "SNVs and indels"
+              annotation:
+                color: blue
+                type: outline
+            - label: "Minimal coverage"
+              value: "10"
+            - label: "Minimum baseQ"
+              value: "20"
+            - label: "Minimum mapping quality"
+              value: "20"
+          screenshot:
+            filename: lofreq.png
+            selector: ".tool-form"
+
+  # ==========================================
+  # Annotate variants
+  # ==========================================
+  - id: annotate-variants
+    title: "Annotating variants"
+    level: 2
+    type: hands_on
+    steps:
+      - type: instruction
+        text: "Upload gene annotations (GTF file) for P. falciparum from Zenodo"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpeff/snpEff_build_gb/5.2+galaxy0
+          name: SnpEff build
+          params:
+            - label: "Name for the database"
+              value: "Pf"
+            - label: "Input annotations are in"
+              value: "GTF"
+          screenshot:
+            filename: snpeff_build.png
+            selector: ".tool-form"
+
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpeff/snpEff/5.2+galaxy0
+          name: SnpEff eff
+          params:
+            - label: "Sequence changes"
+              value: "Output of lofreq"
+            - label: "Genome source"
+              value: "Custom snpEff database in your history"
+          screenshot:
+            filename: snpeff.png
+            selector: ".tool-form"
+
+  # ==========================================
+  # Extract and analyze
+  # ==========================================
+  - id: extract-results
+    title: "Create table of variants"
+    level: 2
+    type: hands_on
+    steps:
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpsift/snpSift_extractFields/4.3+t.galaxy0
+          name: SnpSift Extract Fields
+          params:
+            - label: "Fields to extract"
+              value: "CHROM POS REF ALT QUAL DP AF SB DP4 ANN[*].EFFECT ANN[*].IMPACT ANN[*].GENE ANN[*].AA_POS ANN[*].HGVS_C ANN[*].HGVS_P"
+            - label: "One effect per line"
+              value: "Yes"
+          screenshot:
+            filename: snpsift_extract_fields.png
+            selector: ".tool-form"
+
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/nml/collapse_collections/collapse_dataset/5.1.0
+          name: Collapse Collection
+          params:
+            - label: "Keep one header line"
+              value: "Yes"
+            - label: "Prepend File name"
+              value: "Yes"
+          screenshot:
+            filename: collapse_ui.png
+            selector: ".tool-form"
+
+      - type: tool_run
+        tool:
+          tool_id: Filter1
+          name: Filter
+          params:
+            - label: "With following condition"
+              value: "c13=='PF3D7_0417200'"
+            - label: "Number of header lines to skip"
+              value: "1"
+          screenshot:
+            filename: filter_gene_name.png
+            selector: ".tool-form"
+
+  # ==========================================
+  # Conclusion
+  # ==========================================
+  - id: conclusion
+    title: "Conclusion"
+    level: 1
+    type: conclusion
+    content:
+      - type: text
+        text: "Now you know how to perform a fairly sophisticated variant analysis. Large scale malaria (or any other pathogen) efforts surveying hundreds of thousands of individuals are done in an exactly the same manner: sequence, map, call variants. Try it on your own data!"

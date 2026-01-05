@@ -1,0 +1,179 @@
+metadata:
+  title: NGS Data Management
+  questions:
+    - What does this workflow do?
+  objectives:
+    - Learn to run this workflow step by step
+  contributions:
+    authorship:
+      - 0000-0002-5987-8032
+      - 0000-0002-9676-7032
+      - 0000-0002-9970-6657
+      - 0000-0002-6833-9049
+      - 0000-0001-7649-2388
+  level: Intermediate
+  tags:
+    - introductions
+galaxy:
+  url: https://usegalaxy.org
+output:
+  tutorial_dir: /home/anton/git/training-material/topics/introduction/tutorials/ai-intro-test
+  images_dir: /home/anton/git/training-material/topics/introduction/tutorials/ai-intro-test/images
+sections:
+  - id: intro
+    title: Introduction
+    level: 1
+    type: intro
+    content:
+      - type: text
+        text: NGS data logistics
+  - id: run-workflow
+    title: Running the Workflow
+    level: 2
+    type: hands_on
+    steps:
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/sra_tools/fasterq_dump/3.1.1+galaxy1
+          name: Faster Download and Extract Reads in FASTQ
+          params: []
+          screenshot:
+            filename: faster-download-and-extract-reads-in-fastq.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0+galaxy4
+          name: fastp
+          params: []
+          screenshot:
+            filename: fastp.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/devteam/bwa/bwa_mem/0.7.19
+          name: Map with BWA-MEM
+          params:
+            - label: output_sort
+              value: coordinate
+              icon: param-text
+          screenshot:
+            filename: map-with-bwa-mem.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/samtools_view/samtools_view/1.20+galaxy3
+          name: Samtools view
+          params: []
+          screenshot:
+            filename: samtools-view.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/devteam/picard/picard_MarkDuplicates/3.1.1.0
+          name: MarkDuplicates
+          params:
+            - label: duplicate_scoring_strategy
+              value: SUM_OF_BASE_QUALITIES
+              icon: param-text
+            - label: optical_duplicate_pixel_distance
+              value: "100"
+              icon: param-text
+            - label: validation_stringency
+              value: LENIENT
+              icon: param-text
+          screenshot:
+            filename: markduplicates.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/lofreq_viterbi/lofreq_viterbi/2.1.5+galaxy0
+          name: Realign reads
+          params: []
+          screenshot:
+            filename: realign-reads.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/devteam/samtools_stats/samtools_stats/2.0.5
+          name: Samtools stats
+          params: []
+          screenshot:
+            filename: samtools-stats.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/lofreq_indelqual/lofreq_indelqual/2.1.5+galaxy1
+          name: Insert indel qualities
+          params: []
+          screenshot:
+            filename: insert-indel-qualities.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/multiqc/multiqc/1.27+galaxy3
+          name: MultiQC
+          params:
+            - label: saveLog
+              value: "false"
+              icon: param-text
+          screenshot:
+            filename: multiqc.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/lofreq_call/lofreq_call/2.1.5+galaxy3
+          name: Call variants
+          params:
+            - label: variant_types
+              value: --call-indels
+              icon: param-text
+          screenshot:
+            filename: call-variants.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpeff_sars_cov_2/snpeff_sars_cov_2/4.5covid19
+          name: "SnpEff eff:"
+          params:
+            - label: genome_version
+              value: NC_045512.2
+              icon: param-text
+            - label: inputFormat
+              value: vcf
+              icon: param-text
+            - label: offset
+              value: default
+              icon: param-text
+            - label: udLength
+              value: "0"
+              icon: param-text
+          screenshot:
+            filename: snpeff-eff.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpsift/snpSift_extractFields/4.3+t.galaxy0
+          name: SnpSift Extract Fields
+          params:
+            - label: extract
+              value: CHROM POS FILTER REF ALT QUAL DP AF SB DP4 EFF[*].IMPACT EFF[*].FUNCLASS
+                EFF[*].EFFECT EFF[*].GENE EFF[*].CODON
+              icon: param-text
+          screenshot:
+            filename: snpsift-extract-fields.png
+            selector: ".tool-form, #center form"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/nml/collapse_collections/collapse_dataset/5.1.0
+          name: Collapse Collection
+          params: []
+          screenshot:
+            filename: collapse-collection.png
+            selector: ".tool-form, #center form"
+  - id: conclusion
+    title: Conclusion
+    level: 1
+    type: conclusion
+    content:
+      - type: text
+        text: You have successfully run the NGS_tutorial workflow.

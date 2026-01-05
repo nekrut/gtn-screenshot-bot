@@ -1,0 +1,89 @@
+# Test tutorial config for AI-generated Galaxy introduction
+# Uses gtn-screenshot-bot to generate full tutorial with screenshots
+
+metadata:
+  title: "AI-Generated Galaxy Introduction Test"
+  questions:
+    - "How do Galaxy tools work?"
+    - "How can I assess the quality of my sequencing data?"
+  objectives:
+    - "Learn to upload data into Galaxy"
+    - "Learn to run a quality control tool (fastp)"
+  level: Introductory
+  time_estimation: "30m"
+  contributions:
+    authorship:
+      - nekrut
+  abbreviations:
+    QC: Quality Control
+    NGS: Next-Generation Sequencing
+
+galaxy:
+  url: https://usegalaxy.org
+
+ai:
+  provider: anthropic
+  generate_explanations: true
+  generate_key_points: true
+
+output:
+  tutorial_dir: /home/anton/git/training-material/topics/introduction/tutorials/ai-intro-test
+  images_dir: /home/anton/git/training-material/topics/introduction/tutorials/ai-intro-test/images
+
+sections:
+  - id: intro
+    title: "Introduction"
+    level: 1
+    type: intro
+    content:
+      - type: text
+        generate: true
+        prompt: "Write a brief introduction about quality control of NGS data and why it matters. Keep it to 2-3 paragraphs."
+
+  - id: upload-data
+    title: "Upload Data"
+    level: 2
+    type: hands_on
+    steps:
+      - type: instruction
+        text: "Go to https://usegalaxy.org and log in (or create an account if you don't have one)"
+      - type: instruction
+        text: "Click the **Upload Data** button in the tool panel"
+      - type: instruction
+        text: "Select **Paste/Fetch data** and paste a URL or data"
+
+  - id: run-fastp
+    title: "Quality Control with fastp"
+    level: 2
+    type: hands_on
+    details_blocks:
+      - title: "What is FASTQ?"
+        generate: true
+        topic: "FASTQ file format and quality scores in NGS data"
+    steps:
+      - type: instruction
+        text: "Search for **fastp** in the tool panel"
+      - type: tool_run
+        tool:
+          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0+galaxy4
+          name: fastp
+          params:
+            - label: "Single-end or paired reads"
+              value: "Single-end"
+              icon: param-select
+          screenshot:
+            filename: fastp.png
+            selector: ".tool-form"
+            annotations:
+              - type: box
+                selector: '[data-label*="Single-end"]'
+                color: red
+
+  - id: conclusion
+    title: "Conclusion"
+    level: 1
+    type: conclusion
+    content:
+      - type: text
+        generate: true
+        prompt: "Summarize what was learned about data upload and quality control in Galaxy. Keep it brief (1-2 paragraphs)."

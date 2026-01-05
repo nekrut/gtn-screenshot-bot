@@ -1,0 +1,176 @@
+# Screenshot configuration for galaxy-intro-ngs-data-managment tutorial
+# https://training.galaxyproject.org/training-material/topics/introduction/tutorials/galaxy-intro-ngs-data-managment/tutorial.html
+
+galaxy_url: https://usegalaxy.org
+tutorial: galaxy-intro-ngs-data-managment
+output_dir: ./screenshots/ngs-intro
+
+# Credentials (optional - can also use --username/--password CLI flags)
+# credentials:
+#   username: your_username
+#   password: your_password
+
+screenshots:
+  # Upload dialog - data upload button
+  - id: upload_button
+    description: "Data upload button in Galaxy toolbar"
+    output: upload_button.png
+    steps:
+      - action: navigate
+        url: /
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: '[data-description="upload button"], .upload-button'
+        annotations:
+          - type: box
+            selector: '[data-description="upload button"], .upload-button'
+            color: red
+
+  # fastp tool interface
+  - id: fastp
+    description: "fastp tool interface with paired collection selected"
+    output: fastp.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0+galaxy4
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+        annotations:
+          - type: box
+            selector: '[data-label*="Single-end"], [data-label*="paired"]'
+            color: red
+            label: "Select paired collection"
+
+  # multiqc tool interface
+  - id: multiqc
+    description: "MultiQC tool interface"
+    output: multiqc.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/multiqc/multiqc/1.27+galaxy3
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+        annotations:
+          - type: box
+            selector: '[data-label*="tool was used"]'
+            color: red
+
+  # BWA-MEM2 tool interface
+  - id: bwamem2
+    description: "BWA-MEM2 tool interface"
+    output: bwamem2.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/bwa_mem2/bwa_mem2/2.2.1+galaxy4
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+        annotations:
+          - type: box
+            selector: '[data-label*="reference genome"]'
+            color: red
+          - type: box
+            selector: '[data-label*="Single or Paired"]'
+            color: green
+
+  # MarkDuplicates tool interface
+  - id: markdups
+    description: "MarkDuplicates tool interface"
+    output: markdups.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/devteam/picard/picard_MarkDuplicates/3.1.1.0
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+
+  # lofreq viterbi (realign reads)
+  - id: realign_lofreq
+    description: "Lofreq viterbi tool interface for realigning reads"
+    output: realign_lofreq.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/lofreq_viterbi/lofreq_viterbi/2.1.5+galaxy0
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+
+  # lofreq call variants
+  - id: lofreq
+    description: "Lofreq call variants tool interface"
+    output: lofreq.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/lofreq_call/lofreq_call/2.1.5+galaxy3
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+
+  # SnpEff build
+  - id: snpeff_build
+    description: "SnpEff build database tool interface"
+    output: snpeff_build.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpeff/snpEff_build_gb/5.2+galaxy0
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+
+  # SnpEff eff
+  - id: snpeff
+    description: "SnpEff eff tool interface"
+    output: snpeff.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpeff/snpEff/5.2+galaxy0
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+
+  # SnpSift Extract Fields
+  - id: snpsift_extract_fields
+    description: "SnpSift Extract Fields tool interface"
+    output: snpsift_extract_fields.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/iuc/snpsift/snpSift_extractFields/4.3+t.galaxy0
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+
+  # Collapse Collection
+  - id: collapse_ui
+    description: "Collapse Collection tool interface"
+    output: collapse_ui.png
+    steps:
+      - action: open_tool
+        tool_id: toolshed.g2.bx.psu.edu/repos/nml/collapse_collections/collapse_dataset/5.1.0
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
+
+  # Filter tool
+  - id: filter_gene_name
+    description: "Filter tool interface"
+    output: filter_gene_name.png
+    steps:
+      - action: open_tool
+        tool_id: Filter1
+      - action: wait
+        ms: 2000
+      - action: capture
+        selector: ".tool-form"
