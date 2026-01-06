@@ -9,6 +9,16 @@ export interface HistoryDataset {
   tool_id?: string;       // tool that created this (resolved from job)
 }
 
+export interface HistoryCollection {
+  id: string;
+  name: string;
+  hid: number;
+  collection_type: string;  // 'list', 'paired', 'list:paired'
+  element_count?: number;
+  job_source_id?: string;
+  job_source_type?: string;
+}
+
 export interface ExecutedJob {
   id: string;
   tool_id: string;
@@ -24,7 +34,20 @@ export interface HistoryDetails {
   name: string;
   annotation?: string;
   datasets: HistoryDataset[];
+  collections: HistoryCollection[];
   jobs: ExecutedJob[];  // all jobs executed in this history
+}
+
+export interface CollectionElement {
+  id: string;
+  element_identifier: string;
+  element_index: number;
+  element_type: 'hda' | 'dataset_collection';
+  object: {
+    id: string;
+    name: string;
+    hid?: number;
+  };
 }
 
 export class GalaxyHistoryClient {
@@ -116,12 +139,13 @@ export class GalaxyHistoryClient {
   }
 
   /**
-   * Get history details including contents and jobs
+   * Get history details including contents, collections, and jobs
    */
   async getHistory(historyId: string): Promise<HistoryDetails> {
-    const [historyInfoRaw, contents, jobs] = await Promise.all([
+    const [historyInfoRaw, contents, collections, jobs] = await Promise.all([
       this.fetchApi(`/api/histories/${historyId}`),
       this.getHistoryContents(historyId),
+      this.getHistoryCollections(historyId),
       this.getHistoryJobs(historyId),
     ]);
 
@@ -131,6 +155,7 @@ export class GalaxyHistoryClient {
       name: String(historyInfo.name),
       annotation: historyInfo.annotation ? String(historyInfo.annotation) : undefined,
       datasets: contents,
+      collections,
       jobs,
     };
   }
@@ -157,6 +182,134 @@ export class GalaxyHistoryClient {
       .sort((a, b) => a.hid - b.hid);
 
     return datasets;
+  }
+
+  /**
+   * Get collections in a history
+   */
+  async getHistoryCollections(historyId: string): Promise<HistoryCollection[]> {
+    const contents = await this.fetchApi(
+      `/api/histories/${historyId}/contents?deleted=false&visible=true&types=dataset_collection`
+    ) as Array<Record<string, unknown>>;
+
+    return contents
+      .map((item) => ({
+        id: String(item.id),
+        name: String(item.name),
+        hid: Number(item.hid),
+        collection_type: String(item.collection_type || ''),
+        element_count: item.element_count ? Number(item.element_count) : undefined,
+        job_source_id: item.job_source_id ? String(item.job_source_id) : undefined,
+        job_source_type: item.job_source_type ? String(item.job_source_type) : undefined,
+      }))
+      .sort((a, b) => a.hid - b.hid);
+  }
+
+  /**
+   * Resolve a dataset collection element (DCE) ID to its parent collection
+   * When tools run on collections, inputs show DCE IDs, not collection IDs
+   */
+  async resolveCollectionFromDce(historyId: string, dceId: string): Promise<HistoryCollection | undefined> {
+    // Get all collections in history
+    const collections = await this.getHistoryCollections(historyId);
+
+    // For each collection, check if it contains this DCE
+    for (const collection of collections) {
+      try {
+        const details = await this.fetchApi(
+          `/api/histories/${historyId}/contents/${collection.id}?view=element`
+        ) as Record<string, unknown>;
+
+        const elements = (details.elements || []) as Array<Record<string, unknown>>;
+        const found = this.findDceInElements(elements, dceId);
+        if (found) {
+          return collection;
+        }
+      } catch {
+        // Skip collection if can't fetch details
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Recursively search for DCE ID in collection elements (handles nested collections)
+   */
+  private findDceInElements(elements: Array<Record<string, unknown>>, dceId: string): boolean {
+    for (const element of elements) {
+      if (String(element.id) === dceId) {
+        return true;
+      }
+      // Check nested collections (for list:paired, etc.)
+      const obj = element.object as Record<string, unknown> | undefined;
+      if (obj?.elements) {
+        if (this.findDceInElements(obj.elements as Array<Record<string, unknown>>, dceId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Build a map of DCE ID -> parent collection for all collections in history
+   * More efficient than resolving one at a time
+   */
+  async buildDceToCollectionMap(historyId: string): Promise<Map<string, HistoryCollection>> {
+    const collections = await this.getHistoryCollections(historyId);
+    const dceMap = new Map<string, HistoryCollection>();
+
+    for (const collection of collections) {
+      try {
+        const details = await this.fetchApi(
+          `/api/histories/${historyId}/contents/${collection.id}?view=element`
+        ) as Record<string, unknown>;
+
+        const elements = (details.elements || []) as Array<Record<string, unknown>>;
+        this.collectDceIds(elements, collection, dceMap);
+      } catch {
+        // Skip collection if can't fetch details
+      }
+    }
+
+    return dceMap;
+  }
+
+  /**
+   * Recursively collect all DCE IDs from collection elements
+   */
+  private collectDceIds(
+    elements: Array<Record<string, unknown>>,
+    parentCollection: HistoryCollection,
+    dceMap: Map<string, HistoryCollection>
+  ): void {
+    for (const element of elements) {
+      dceMap.set(String(element.id), parentCollection);
+      // Handle nested collections
+      const obj = element.object as Record<string, unknown> | undefined;
+      if (obj?.elements) {
+        this.collectDceIds(obj.elements as Array<Record<string, unknown>>, parentCollection, dceMap);
+      }
+    }
+  }
+
+  /**
+   * Group jobs by tool_id and return first job of each group
+   * Used for deduplication when tools run on collection elements
+   */
+  groupJobsByTool(jobs: ExecutedJob[]): ExecutedJob[] {
+    const toolJobMap = new Map<string, ExecutedJob>();
+
+    for (const job of jobs) {
+      // Use first occurrence of each tool
+      if (!toolJobMap.has(job.tool_id)) {
+        toolJobMap.set(job.tool_id, job);
+      }
+    }
+
+    // Return in original order (by create_time since jobs are pre-sorted)
+    return Array.from(toolJobMap.values());
   }
 
   /**
@@ -279,7 +432,7 @@ export class GalaxyHistoryClient {
 
     // Fetch history with jobs
     const history = await this.getHistory(historyId);
-    console.log(`  Found ${history.datasets.length} datasets, ${history.jobs.length} executed tool jobs`);
+    console.log(`  Found ${history.datasets.length} datasets, ${history.collections.length} collections, ${history.jobs.length} executed tool jobs`);
 
     return history;
   }

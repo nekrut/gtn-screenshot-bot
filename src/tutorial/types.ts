@@ -199,6 +199,7 @@ export interface HandsOnStep {
 }
 
 export interface ToolStep {
+  type?: 'tool_run';  // For compatibility with HandsOnStep pattern
   tool_id: string;
   name: string;
   version?: string;
@@ -208,6 +209,19 @@ export interface ToolStep {
 
   // Input datasets from history to select in tool form
   input_datasets?: InputDatasetRef[];
+
+  // Full job params for form filling (from history-based generation)
+  job_params?: import('../galaxy/job-params').JobFullParams;
+
+  // Resolved collection inputs: param_name -> { hid, name }
+  input_collections?: Record<string, { hid: number; name: string }>;
+
+  // Resolved dataset inputs: param_name -> { hid, name }
+  resolved_inputs?: Record<string, { hid: number; name: string }>;
+
+  // For single-dataset output tools: use /tool_runner/rerun?id=<dataset_id>
+  // This shows correct inputs without needing text replacement
+  rerun_dataset_id?: string;
 }
 
 export interface InputDatasetRef {
@@ -335,4 +349,39 @@ export interface GeneratedTutorial {
 export interface GeneratedImage {
   filename: string;
   data: Buffer;
+}
+
+// Element bounds for screenshot annotations
+export interface ElementBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// Annotation types for image markup
+export type Annotation = BoxAnnotation | ArrowAnnotation | TextAnnotation;
+
+export interface BoxAnnotation {
+  type: 'box';
+  selector: string;
+  color: string;
+  label?: string;
+  lineWidth?: number;
+}
+
+export interface ArrowAnnotation {
+  type: 'arrow';
+  from: [number, number] | string;
+  to: [number, number] | string;
+  color: string;
+  lineWidth?: number;
+}
+
+export interface TextAnnotation {
+  type: 'text';
+  position: [number, number];
+  text: string;
+  color?: string;
+  fontSize?: number;
 }

@@ -1,22 +1,14 @@
-# GTN Screenshot Bot
+# GTN Tutorial Generator
 
-Automated tutorial and screenshot generation for [Galaxy Training Network](https://training.galaxyproject.org) (GTN). Generates complete GTN-formatted tutorials from Galaxy workflows, including AI-generated explanations and automated tool screenshots.
+Generate [Galaxy Training Network](https://training.galaxyproject.org) tutorials automatically from Galaxy history URLs.
 
-## Overview
+## What It Does
 
-This tool takes a Galaxy workflow (`.ga` file) and optionally a Galaxy history URL, then generates:
-- Complete `tutorial.md` in GTN kramdown format
-- Screenshots of each tool's interface
-- AI-generated explanations for each tool step
-
-### Key Feature: History-Driven Generation
-
-The tool uses the **Galaxy history as the source of truth** to determine which tools actually executed. This handles:
-- **Conditional workflows**: Only tools that ran appear in the tutorial
-- **Complex branching**: Multiple execution paths are correctly handled
-- **Subworkflows**: Flattened into executed tool steps
-
-The history is queried via `/api/jobs?history_id=X` to get all executed jobs, filtered to remove internal workflow helper tools.
+Given a Galaxy history URL, this tool:
+1. Extracts all executed tool jobs from the history
+2. Fetches exact parameters used for each tool
+3. Generates screenshots of each tool form with correct settings
+4. Produces a complete `tutorial.md` in GTN kramdown format
 
 ## Quick Start
 
@@ -25,406 +17,175 @@ The history is queried via `/api/jobs?history_id=X` to get all executed jobs, fi
 npm install
 npm run build
 
-# Create API key files (gitignored)
+# Create API key files
 echo "your-galaxy-api-key" > .galaxy-api-key
 echo "sk-ant-api03-..." > .anthropic-api-key
 
-# Download a workflow
-curl -O https://raw.githubusercontent.com/iwc-workflows/rnaseq-pe/main/rnaseq-pe.ga
-
-# Generate tutorial from workflow + history
-npx tsx src/cli.ts from-workflow \
-  -w rnaseq-pe.ga \
-  -o tutorial-config.yaml \
+# Generate tutorial
+node dist/cli.js from-history \
   -h "https://usegalaxy.org/u/username/h/history-slug" \
-  --output-dir ./output \
-  --images-dir ./output/images \
+  --username your@email.com \
+  --password yourpassword \
   --generate
 ```
+
+## CLI Options
+
+```
+-h, --history <url>     Galaxy history URL (required)
+-o, --output <dir>      Output directory (default: ./output)
+--username <user>       Galaxy username for browser login
+--password <pass>       Galaxy password for browser login
+--api-key <key>         Galaxy API key (for REST API calls)
+--anthropic-key <key>   Anthropic API key (for AI text generation)
+--generate              Generate full tutorial with screenshots
+--config-only           Only generate config YAML, skip tutorial
+```
+
+## How It Works
+
+### Data Flow
+
+```
+History URL
+     ↓
+┌─────────────────────────────────────────────────┐
+│  1. Fetch history metadata + jobs               │
+│     GET /api/histories/published?slug=X         │
+│     GET /api/jobs?history_id=X                  │
+└─────────────────────────────────────────────────┘
+     ↓
+┌─────────────────────────────────────────────────┐
+│  2. Get full params for each job                │
+│     GET /api/jobs/{id}?full=true                │
+│     → Returns all tool settings                 │
+└─────────────────────────────────────────────────┘
+     ↓
+┌─────────────────────────────────────────────────┐
+│  3. Generate screenshots (Playwright)           │
+│     Open tool in job rerun mode                 │
+│     → ?tool_id=X&job_id=Y                       │
+│     Form pre-filled with exact params           │
+└─────────────────────────────────────────────────┘
+     ↓
+┌─────────────────────────────────────────────────┐
+│  4. Write GTN markdown                          │
+│     Frontmatter + hands-on sections             │
+│     One section per tool                        │
+└─────────────────────────────────────────────────┘
+     ↓
+   tutorial.md + images/
+```
+
+### Screenshot Generation
+
+The tool uses **job rerun mode** (`?tool_id=X&job_id=Y`) to open tool forms with exact parameters pre-filled from the original execution.
+
+**For map-over tools** (tools that ran on collection elements):
+- Galaxy shows individual element name (e.g., "SRR123_R1.fastq")
+- We replace displayed text with collection name (e.g., "17: data")
+- Uses DOM manipulation to find "(as dataset collection)" marker
+
+**For single-job tools** (tools that took a collection directly):
+- Job rerun shows correct collection input when logged in as history owner
+- Falls back to dropdown selection if needed
+
+### API Endpoints Used
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/histories/published?slug=X` | Resolve published history URL to ID |
+| `GET /api/jobs?history_id=X` | Get all executed jobs in history |
+| `GET /api/jobs/{id}?full=true` | Get full job parameters |
+| `GET /api/datasets/{id}/parameters_display` | Get input collection references |
+| `GET /api/tools/{id}/build` | Get tool form schema (name→label mapping) |
+
+### Collection Job Deduplication
+
+When a tool runs on a collection, Galaxy spawns **multiple jobs** (one per element). The tool:
+1. Groups jobs by `tool_id`
+2. Takes first job from each group
+3. Detects collection inputs via `"src": "dce"` in params
+4. Resolves element back to parent collection for display
 
 ## Architecture
 
 ```
 src/
-├── cli.ts                    # Command-line interface (commander.js)
+├── cli.ts                      # CLI entry point
 ├── galaxy/
-│   ├── client.ts             # Playwright-based Galaxy browser automation
-│   ├── history-client.ts     # Galaxy History/Jobs API client
-│   └── api-key-loader.ts     # Load API keys from .galaxy-api-key/.anthropic-api-key
+│   ├── client.ts               # Playwright browser automation
+│   ├── history-client.ts       # History/Jobs REST API
+│   ├── job-params.ts           # Job parameter extraction
+│   ├── form-mapper.ts          # Tool form schema parsing
+│   └── api-key-loader.ts       # Load keys from files
 ├── tutorial/
-│   ├── types.ts              # TypeScript types for GTN tutorial format
-│   ├── generator.ts          # Main tutorial generation orchestrator
-│   ├── ai-generator.ts       # Anthropic/OpenAI API for explanations
-│   ├── workflow-converter.ts # Convert .ga workflow to TutorialConfig
-│   ├── history-enricher.ts   # Extract executed tools from history jobs
-│   └── recording-converter.ts # Convert Chrome DevTools recordings
-├── capture/
-│   ├── screenshot.ts         # Screenshot capture runner
-│   └── annotate.ts           # Image annotation (boxes, arrows)
-└── config/
-    └── types.ts              # Screenshot config types
+│   ├── history-converter.ts    # History → TutorialConfig
+│   ├── generator.ts            # Config → Markdown + Screenshots
+│   ├── ai-generator.ts         # AI explanations (Anthropic)
+│   └── types.ts                # TypeScript types
+└── capture/
+    └── annotate.ts             # Image annotations (boxes, arrows)
 ```
 
-### Data Flow
+### Key Components
 
-```
-Workflow (.ga) + History URL
-        ↓
-┌───────────────────────┐
-│  workflow-converter   │  Parse workflow JSON, fetch history jobs
-└───────────────────────┘
-        ↓
-┌───────────────────────┐
-│  history-enricher     │  Match jobs to workflow steps, filter helpers
-└───────────────────────┘
-        ↓
-┌───────────────────────┐
-│  TutorialConfig       │  YAML config with sections, tools, screenshots
-└───────────────────────┘
-        ↓
-┌───────────────────────┐
-│  TutorialGenerator    │  Orchestrate screenshot + AI generation
-└───────────────────────┘
-        ↓
-┌─────────────┬─────────────┐
-│ GalaxyClient│ AIGenerator │
-│ (Playwright)│ (Anthropic) │
-└─────────────┴─────────────┘
-        ↓
-    tutorial.md + images/
-```
+**HistoryConverter** (`src/tutorial/history-converter.ts`)
+- Parses history URL (published or direct)
+- Fetches jobs via REST API
+- Groups jobs by tool, resolves collection inputs
+- Builds TutorialConfig with sections
 
-## API Key Setup
+**TutorialGenerator** (`src/tutorial/generator.ts`)
+- Orchestrates screenshot + markdown generation
+- Opens tools in Playwright browser
+- Calls AI for explanations (optional)
+- Writes tutorial.md and images
 
-Create two files in the project root (both are gitignored):
+**GalaxyClient** (`src/galaxy/client.ts`)
+- Playwright-based browser automation
+- Login (username/password or API key)
+- Tool form navigation and manipulation
+- Screenshot capture
 
-```bash
-# Galaxy API key (for history access + authenticated screenshots)
-echo "your-galaxy-api-key" > .galaxy-api-key
+**JobParamsClient** (`src/galaxy/job-params.ts`)
+- Fetches full job params from `/api/jobs/{id}?full=true`
+- Parses JSON-stringified parameter values
+- Extracts input dataset/collection references
 
-# Anthropic API key (for AI-generated explanations)
-echo "sk-ant-api03-..." > .anthropic-api-key
-```
+## Internal Tools Filtered
 
-Keys are auto-loaded by `api-key-loader.ts`. CLI flags override file-based keys.
-
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `from-workflow` | Convert Galaxy workflow to tutorial config (+ optional generation) |
-| `generate` | Generate tutorial from existing config YAML |
-| `screenshots` | Capture screenshots only (no tutorial generation) |
-| `convert` | Convert Chrome DevTools recording to config |
-| `init` | Create template config file |
-
-### from-workflow Options
-
-```
--w, --workflow <path>     Path to Galaxy workflow (.ga) file [required]
--o, --output <path>       Output path for config YAML [required]
--h, --history <url>       Galaxy history URL (enables history-driven mode)
---output-dir <dir>        Tutorial output directory (default: ./output)
---images-dir <dir>        Images output directory (default: ./output/images)
---generate                Also generate the tutorial (not just config)
---url <url>               Galaxy URL (default: https://usegalaxy.org)
---api-key <key>           Galaxy API key (overrides .galaxy-api-key)
---anthropic-key <key>     Anthropic API key (overrides .anthropic-api-key)
-```
-
-### generate Options
-
-```
--c, --config <path>       Path to tutorial config YAML [required]
--u, --url <url>           Override Galaxy URL
---api-key <key>           Galaxy API key
---anthropic-key <key>     Anthropic API key
-```
-
-## Galaxy History API
-
-### Endpoints Used
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /api/histories/published?slug=X` | Resolve published history URL to ID |
-| `GET /api/histories/{id}` | Get history metadata |
-| `GET /api/histories/{id}/contents` | Get datasets (limited - misses collections) |
-| `GET /api/jobs?history_id=X` | **Primary**: Get ALL executed jobs |
-| `GET /api/jobs/{id}` | Get job details (tool_id, inputs, outputs) |
-
-### History URL Formats Supported
-
-```
-https://usegalaxy.org/histories/view?id=abc123
-https://usegalaxy.org/history/view/abc123
-https://usegalaxy.org/u/username/h/history-slug  (published)
-```
-
-### Internal Tools Filtered Out
-
-The following are excluded from tutorials (workflow infrastructure):
+These workflow infrastructure tools are excluded from tutorials:
 - `__MERGE_COLLECTION__`, `__RELABEL_FROM_FILE__`, `__FLATTEN__`
 - `map_param_value`, `pick_value`, `compose_text_param`
-- `param_value_from_file`
 - Any tool starting with `__`
 - Jobs with `state: skipped` or `state: error`
-
-## Key Files
-
-### `src/galaxy/history-client.ts`
-
-Galaxy API client for history/jobs. Key types:
-
-```typescript
-interface ExecutedJob {
-  id: string;
-  tool_id: string;
-  state: string;
-  create_time: string;
-  inputs: Record<string, unknown>;
-  outputs: Record<string, unknown>;
-}
-
-interface HistoryDetails {
-  id: string;
-  name: string;
-  datasets: HistoryDataset[];
-  jobs: ExecutedJob[];  // All executed jobs (filtered)
-}
-```
-
-Key method: `getHistoryJobs(historyId)` - fetches all jobs via `/api/jobs?history_id=X`, filters out internal tools.
-
-### `src/tutorial/history-enricher.ts`
-
-Maps history jobs to workflow steps:
-
-```typescript
-class HistoryEnricher {
-  // Uses history.jobs (from Jobs API) to build executed steps
-  getExecutedSteps(): ExecutedStep[]
-
-  // Legacy method for workflow-converter compatibility
-  enrichSteps(): EnrichedStep[]
-}
-```
-
-### `src/tutorial/workflow-converter.ts`
-
-Converts workflow + history to TutorialConfig:
-
-```typescript
-// If historyData provided:
-//   → HISTORY-DRIVEN: Only tools from history.jobs appear
-// If no history:
-//   → WORKFLOW-ONLY: All tool steps from workflow appear
-```
-
-### `src/tutorial/generator.ts`
-
-Main orchestrator:
-- `generateHandsOn()` - Creates hands-on blocks, calls AI for tool explanations
-- `generateToolStep()` - Formats tool with params + screenshot
-- `generateScreenshotStep()` - Captures/saves screenshots
-
-### `src/galaxy/client.ts`
-
-Playwright-based browser automation:
-
-```typescript
-class GalaxyClient {
-  init()                    // Launch headless Chromium (1920x1080)
-  loginWithApiKey(key)      // Authenticate via sessionStorage + cookie
-  openTool(toolId)          // Navigate to tool URL, wait for form
-  captureScreenshot(opts)   // Element or full-page screenshot
-}
-```
-
-## TutorialConfig Format
-
-Intermediate YAML config matching GTN's tutorial structure:
-
-```yaml
-metadata:
-  title: "RNA-seq Analysis"
-  questions: ["What does this workflow do?"]
-  objectives: ["Learn to run this workflow"]
-  level: Intermediate
-  contributions:
-    authorship: ["username"]
-
-galaxy:
-  url: https://usegalaxy.org
-  api_key: <key>
-
-ai:
-  provider: anthropic
-  generate_explanations: true
-
-output:
-  tutorial_dir: ./output
-  images_dir: ./output/images
-
-sections:
-  - id: intro
-    title: Introduction
-    type: intro
-    content:
-      - type: text
-        text: "Workflow description..."
-
-  - id: fastp
-    title: fastp
-    type: hands_on
-    steps:
-      - type: tool_run
-        tool:
-          tool_id: toolshed.g2.bx.psu.edu/repos/iuc/fastp/fastp/0.24.0+galaxy3
-          name: fastp
-          params: []
-          screenshot:
-            filename: fastp.png
-            selector: "#center"
-```
-
-## GTN Tutorial Format
-
-Generated tutorials follow [GTN kramdown format](https://training.galaxyproject.org/training-material/topics/contributing/tutorials/create-new-tutorial-content/tutorial.html):
-
-```markdown
----
-layout: tutorial_hands_on
-title: RNA-seq Analysis
-questions:
-- What does this workflow do?
-objectives:
-- Learn to run this workflow
----
-
-# Introduction
-
-This workflow...
-
-> <agenda-title></agenda-title>
-> 1. TOC
-> {:toc}
-{: .agenda}
-
-## fastp
-
-> <hands-on-title>fastp</hands-on-title>
->
-> **fastp** performs adapter trimming and quality filtering...
->
-> 1. **fastp** {% icon tool %} with the following parameters:
->
-> ![fastp.png](images/fastp.png)
-{: .hands_on}
-```
-
-Block types: `{: .hands_on}`, `{: .details}`, `{: .agenda}`, `{: .tip}`, `{: .warning}`
-
-## Development
-
-```bash
-# Run in development mode
-npx tsx src/cli.ts <command> [options]
-
-# Build for production
-npm run build
-
-# Run built version
-npm start <command> [options]
-```
 
 ## Troubleshooting
 
 ### "Found N datasets, 0 jobs"
-
-The history URL may be wrong or the API key doesn't have access. Verify:
+The history URL may be wrong or API key lacks access. Test:
 ```bash
 curl -H "x-api-key: YOUR_KEY" \
   "https://usegalaxy.org/api/jobs?history_id=YOUR_HISTORY_ID"
 ```
 
-### Published history not resolving
-
-Published history resolution tries multiple endpoints. If failing, use direct history ID URL:
-```
-https://usegalaxy.org/histories/view?id=HISTORY_ID
-```
-
-### Missing tools in tutorial
-
-Collections (dataset_collection) don't expose `creating_job` directly. The fix was to use `/api/jobs?history_id=X` instead of tracing dataset provenance.
-
-### Screenshot capture fails
-
-Ensure Galaxy is accessible and API key is valid. Tool forms require authentication for some parameters.
+### "(unavailable)" in screenshots
+You're not logged in as the history owner. Use `--username` and `--password` for full access to datasets.
 
 ### Tool form timeout
+Galaxy server slow or tool ID changed. Verify tool exists on target Galaxy.
 
-Galaxy server slow or tool ID wrong. Check tool exists on target Galaxy.
-
-### No AI text
-
-Missing `ANTHROPIC_API_KEY` or `--anthropic-key`. Check `ai:` section in config.
-
-## Context for Claude
-
-When re-establishing context on a new machine, key points:
-
-1. **Primary goal**: Generate GTN tutorials from Galaxy workflows + histories
-2. **Key insight**: Use Jobs API (`/api/jobs?history_id=X`) not dataset provenance
-3. **Why**: Dataset provenance misses collections; Jobs API shows ALL executed tools
-4. **Conditional workflows**: History shows what actually ran (skips conditional branches)
-5. **Architecture**: workflow-converter → history-enricher → generator → client/AI
-6. **API keys**: `.galaxy-api-key` and `.anthropic-api-key` files in project root
-
-### Important Design Decisions
-
-| Decision | Why |
-|----------|-----|
-| Jobs API over dataset provenance | Collections don't expose `creating_job`; Jobs API returns all 42 jobs vs 6 datasets |
-| Filter internal tools | `map_param_value`, `__MERGE_COLLECTION__` etc. are workflow infrastructure |
-| Separate hands-on per tool | GTN convention - each tool gets its own section |
-| Selector `#center` | Captures tool form without Galaxy sidebars |
-
-### Test Command
-
-```bash
-# RNA-seq PE workflow with published history (expects 26 tool steps)
-curl -O https://raw.githubusercontent.com/iwc-workflows/rnaseq-pe/main/rnaseq-pe.ga
-
-npx tsx src/cli.ts from-workflow \
-  -w rnaseq-pe.ga \
-  -o /tmp/config.yaml \
-  -h "https://usegalaxy.org/u/cartman/h/unnamed-history-11" \
-  --output-dir /tmp/tutorial \
-  --images-dir /tmp/tutorial/images \
-  --generate
-```
-
-Expected output: 26 tool steps including fastp, STAR (rna_star), StringTie, Cufflinks, FeatureCounts, MultiQC, RSeQC tools, Picard, samtools, fastqc, bedtools.
-
-### File Locations
-
-```
-/home/anton/git/gtn-screenshot-bot/     # This project
-/home/anton/git/training-material/      # GTN training materials
-.galaxy-api-key                         # Galaxy API key (gitignored)
-.anthropic-api-key                      # Anthropic API key (gitignored)
-```
+### Missing AI text
+Set `ANTHROPIC_API_KEY` env var or create `.anthropic-api-key` file.
 
 ## Dependencies
 
 - `playwright` - Browser automation (headless Chromium)
 - `sharp` - Image manipulation
 - `yaml` - YAML parsing
-- `commander` - CLI
-- TypeScript 5.3+
-- Node.js 20+
+- `commander` - CLI framework
+- TypeScript 5.3+, Node.js 20+
 
 ## License
 

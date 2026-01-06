@@ -21,17 +21,28 @@ import {
   SnippetContent,
 } from './types';
 import { AIGenerator } from './ai-generator';
+import { FormMapper } from '../galaxy/form-mapper';
+import { GalaxyHistoryClient } from '../galaxy/history-client';
+
+export interface GeneratorOptions {
+  formMapper?: FormMapper;
+  historyClient?: GalaxyHistoryClient;
+}
 
 export class TutorialGenerator {
   private config: TutorialConfig;
   private client: GalaxyClient;
   private ai: AIGenerator | null;
   private images: GeneratedImage[] = [];
+  private formMapper?: FormMapper;
+  private historyClient?: GalaxyHistoryClient;
 
-  constructor(config: TutorialConfig) {
+  constructor(config: TutorialConfig, options?: GeneratorOptions) {
     this.config = config;
     this.client = new GalaxyClient(config.galaxy.url);
     this.ai = config.ai ? new AIGenerator(config.ai) : null;
+    this.formMapper = options?.formMapper;
+    this.historyClient = options?.historyClient;
   }
 
   async generate(): Promise<GeneratedTutorial> {
@@ -428,11 +439,36 @@ ${this.indentBlock(parts.join('\n'), '> ')}
     if (tool.screenshot) {
       console.log(`  Opening tool: ${tool.tool_id}`);
       try {
-        await this.client.openTool(tool.tool_id);
+        // Choose rerun method based on tool type:
+        // - Single-dataset output: use /tool_runner/rerun?id=<dataset_id> (shows correct inputs)
+        // - Map-over (collection) output: use job_id rerun + text replacement
+        const rerunDatasetId = tool.rerun_dataset_id;
+        const jobId = tool.job_params?.jobId;
+
+        await this.client.openTool(tool.tool_id, jobId, rerunDatasetId);
         toolOpened = true;
 
-        // Select input datasets from history if specified
-        if (tool.input_datasets && tool.input_datasets.length > 0) {
+        // Give extra time for rerun form to fully populate
+        if (rerunDatasetId || jobId) {
+          await this.client.wait({ ms: 2000 });
+
+          // Handle collection inputs
+          if (tool.input_collections && Object.keys(tool.input_collections).length > 0) {
+            for (const [paramName, collInfo] of Object.entries(tool.input_collections)) {
+              const collectionText = `${collInfo.hid}: ${collInfo.name}`;
+
+              // Try 1: Replace text if field shows "(as dataset collection)" - for map-over tools
+              const replaced = await this.client.replaceCollectionInputText(collectionText);
+
+              // Try 2: Select from dropdown if field is empty - for single-job tools
+              if (!replaced) {
+                await this.client.selectCollectionByHid(paramName, collInfo.hid, collInfo.name);
+              }
+            }
+          }
+        }
+        // Legacy: manually select input datasets if no job_params
+        else if (tool.input_datasets && tool.input_datasets.length > 0) {
           console.log(`  Selecting ${tool.input_datasets.length} input dataset(s)...`);
           for (const inputDs of tool.input_datasets) {
             await this.client.selectDatasetInput(inputDs.param_label, inputDs.dataset_name);

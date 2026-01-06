@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { Annotation, BoxAnnotation, ArrowAnnotation, TextAnnotation, ElementBounds } from '../config/types';
+import { Annotation, BoxAnnotation, ArrowAnnotation, TextAnnotation, ElementBounds } from '../tutorial/types';
 
 const COLOR_MAP: Record<string, string> = {
   red: '#ff0000',
