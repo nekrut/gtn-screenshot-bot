@@ -611,13 +611,24 @@ ${this.indentBlock(parts.join('\n'), '> ')}
                 // Format value for display
                 let valueStr = '';
                 if (typeof p.value === 'object' && p.value !== null) {
-                  // Data input - extract name if available
-                  const val = p.value as Record<string, unknown>;
-                  if (val.name) {
-                    valueStr = String(val.name);
-                  } else if (Array.isArray(p.value) && p.value.length > 0) {
-                    const first = p.value[0] as Record<string, unknown>;
-                    valueStr = first.name ? String(first.name) : '[collection]';
+                  // Data input - check if we have resolved collection info
+                  let foundCollection = false;
+                  if (tool.input_collections) {
+                    for (const [, collInfo] of Object.entries(tool.input_collections)) {
+                      // Use resolved collection name (hid: name format)
+                      valueStr = `${collInfo.hid}: ${collInfo.name}`;
+                      foundCollection = true;
+                      break;
+                    }
+                  }
+                  if (!foundCollection) {
+                    const val = p.value as Record<string, unknown>;
+                    if (val.name) {
+                      valueStr = String(val.name);
+                    } else if (Array.isArray(p.value) && p.value.length > 0) {
+                      const first = p.value[0] as Record<string, unknown>;
+                      valueStr = first.name ? String(first.name) : '[collection]';
+                    }
                   }
                 } else {
                   valueStr = String(p.value);
