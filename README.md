@@ -8,7 +8,8 @@ Given a Galaxy history URL, this tool:
 1. Extracts all executed tool jobs from the history
 2. Fetches exact parameters used for each tool
 3. Generates screenshots of each tool form with correct settings
-4. Produces a complete `tutorial.md` in GTN kramdown format
+4. **Annotates screenshots** with arrows highlighting parameters changed from defaults
+5. Produces a complete `tutorial.md` in GTN kramdown format
 
 ## Quick Start
 
@@ -90,6 +91,32 @@ The tool uses **job rerun mode** (`?tool_id=X&job_id=Y`) to open tool forms with
 - Job rerun shows correct collection input when logged in as history owner
 - Falls back to dropdown selection if needed
 
+### Automatic Parameter Annotations
+
+Screenshots are automatically annotated to highlight parameters that differ from tool defaults:
+
+![Example annotated screenshot](docs/example-bwa-mem2.png)
+
+**How it works:**
+1. Fetches tool schema from `/api/tools/{id}/build` to get default values
+2. Compares job parameters against defaults using `/api/jobs/{id}/parameters_display`
+3. Identifies changed parameters (accounting for value/label format differences)
+4. Draws red arrows pointing to each changed field
+5. Adds a "Key parameters to change" comment box listing all changes
+
+**Generated markdown:**
+```markdown
+> > <comment-title>Key parameters to change</comment-title>
+> >
+> >    - *"Using reference genome"*: `GCF_000002765.5`
+> >    - *"Single or Paired-end reads"*: `paired_collection`
+> {: .comment}
+>
+> ![bwa-mem2.png](images/bwa-mem2.png)
+```
+
+This helps tutorial users immediately see which settings need attention vs. which can be left at defaults.
+
 ### API Endpoints Used
 
 | Endpoint | Purpose |
@@ -97,8 +124,9 @@ The tool uses **job rerun mode** (`?tool_id=X&job_id=Y`) to open tool forms with
 | `GET /api/histories/published?slug=X` | Resolve published history URL to ID |
 | `GET /api/jobs?history_id=X` | Get all executed jobs in history |
 | `GET /api/jobs/{id}?full=true` | Get full job parameters |
+| `GET /api/jobs/{id}/parameters_display` | Get human-readable parameter labels/values |
 | `GET /api/datasets/{id}/parameters_display` | Get input collection references |
-| `GET /api/tools/{id}/build` | Get tool form schema (name→label mapping) |
+| `GET /api/tools/{id}/build` | Get tool form schema (defaults + options) |
 
 ### Collection Job Deduplication
 

@@ -6,6 +6,7 @@
 export interface FormInput {
   name: string;
   label?: string;
+  title?: string;  // Used by section type inputs
   type: string;  // 'data', 'select', 'text', 'boolean', 'conditional', 'repeat', 'section', etc.
   value?: unknown;  // default value
   optional?: boolean;
@@ -44,12 +45,20 @@ export interface FormFieldMapping {
 export class FormMapper {
   private galaxyUrl: string;
   private apiKey: string;
+  private historyId?: string;
   private schemaCache: Map<string, ToolFormSchema> = new Map();
   private mappingCache: Map<string, Map<string, FormFieldMapping>> = new Map();
 
   constructor(galaxyUrl: string, apiKey: string) {
     this.galaxyUrl = galaxyUrl.replace(/\/$/, '');
     this.apiKey = apiKey;
+  }
+
+  /**
+   * Set history ID for tool schema requests (required by Galaxy API)
+   */
+  setHistoryId(historyId: string): void {
+    this.historyId = historyId;
   }
 
   /**
@@ -61,11 +70,14 @@ export class FormMapper {
       return this.schemaCache.get(toolId)!;
     }
 
-    // Build URL with optional history_id
+    // Use provided historyId or instance default
+    const effectiveHistoryId = historyId || this.historyId;
+
+    // Build URL with history_id (required by Galaxy API)
     const encodedToolId = encodeURIComponent(toolId);
     let url = `${this.galaxyUrl}/api/tools/${encodedToolId}/build`;
-    if (historyId) {
-      url += `?history_id=${encodeURIComponent(historyId)}`;
+    if (effectiveHistoryId) {
+      url += `?history_id=${encodeURIComponent(effectiveHistoryId)}`;
     }
 
     const response = await fetch(url, {
@@ -127,9 +139,17 @@ export class FormMapper {
       const currentPath = [...path, input.name];
       const fullName = currentPath.join('|');
 
+      // Use title (for sections), test_param.label (for conditionals), or label/name as fallback
+      let displayLabel: string;
+      if (input.type === 'conditional' && input.test_param?.label) {
+        displayLabel = input.test_param.label;
+      } else {
+        displayLabel = input.title || input.label || input.name;
+      }
+
       mapping.set(input.name, {
         internalName: input.name,
-        label: input.label || input.name,
+        label: displayLabel,
         type: input.type,
         path: currentPath,
         defaultValue: input.value,
@@ -142,7 +162,7 @@ export class FormMapper {
       if (path.length > 0) {
         mapping.set(fullName, {
           internalName: fullName,
-          label: input.label || input.name,
+          label: displayLabel,
           type: input.type,
           path: currentPath,
           defaultValue: input.value,
@@ -265,5 +285,59 @@ export class FormMapper {
     }
 
     return value;
+  }
+
+  /**
+   * Get CSS selector for a form field by label
+   * Galaxy uses different DOM structures for sections vs regular inputs
+   */
+  getFieldSelector(label: string, type?: string): string {
+    // Escape special characters in label for CSS selector
+    const escapedLabel = label.replace(/"/g, '\\"');
+
+    if (type === 'section') {
+      // Sections use portlet structure with .portlet-title-text
+      return `.ui-portlet-section:has(.portlet-title-text:text-is("${escapedLabel}"))`;
+    }
+
+    if (type === 'conditional') {
+      // Conditionals - target the portlet header row containing the title and dropdown
+      return `.portlet-header:has(b:text-is("${escapedLabel}"))`;
+    }
+
+    // Regular form fields use ui-form-element
+    return `.ui-form-element:has(.ui-form-title-text:text-is("${escapedLabel}"))`;
+  }
+
+  /**
+   * Get all non-default parameters with their selectors for annotation
+   */
+  async getNonDefaultFieldSelectors(
+    toolId: string,
+    params: Record<string, { value: unknown; isCollection?: boolean }>
+  ): Promise<Array<{ paramName: string; label: string; selector: string; value: unknown }>> {
+    const mapping = await this.buildFormMapping(toolId);
+    const results: Array<{ paramName: string; label: string; selector: string; value: unknown }> = [];
+
+    for (const [name, param] of Object.entries(params)) {
+      const field = mapping.get(name);
+      if (!field) continue;
+
+      // Skip section and repeat types - they're containers, not actual parameters
+      if (field.type === 'section' || field.type === 'repeat') continue;
+
+      const isNonDefault = await this.isNonDefault(toolId, name, param.value);
+
+      if (isNonDefault) {
+        results.push({
+          paramName: name,
+          label: field.label,
+          selector: this.getFieldSelector(field.label, field.type),
+          value: param.value,
+        });
+      }
+    }
+
+    return results;
   }
 }

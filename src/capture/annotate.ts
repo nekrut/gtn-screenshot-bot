@@ -125,10 +125,34 @@ async function renderArrow(
 ): Promise<string | null> {
   let fromX: number, fromY: number;
   let toX: number, toY: number;
+  let toBounds: ElementBounds | null = null;
+
+  // Resolve "to" position first (needed if "from" is relative)
+  if (Array.isArray(annotation.to)) {
+    [toX, toY] = annotation.to;
+  } else {
+    toBounds = await getBounds(annotation.to);
+    if (!toBounds) {
+      console.warn(`Arrow annotation: "to" element not found for selector "${annotation.to}"`);
+      return null;
+    }
+    // Point to right edge of element (arrow comes from right, points left)
+    toX = toBounds.x + toBounds.width;
+    toY = toBounds.y + toBounds.height / 2;
+  }
 
   // Resolve "from" position
   if (Array.isArray(annotation.from)) {
-    [fromX, fromY] = annotation.from;
+    // If "from" looks like a relative offset (small numbers), apply relative to target
+    const [dx, dy] = annotation.from;
+    if (Math.abs(dx) <= 200 && Math.abs(dy) <= 200 && toBounds) {
+      // Relative offset from target element's right edge
+      fromX = toBounds.x + toBounds.width + dx;
+      fromY = toBounds.y + toBounds.height / 2 + dy;
+    } else {
+      // Absolute coordinates
+      [fromX, fromY] = annotation.from;
+    }
   } else {
     const bounds = await getBounds(annotation.from);
     if (!bounds) {
@@ -137,19 +161,6 @@ async function renderArrow(
     }
     fromX = bounds.x + bounds.width / 2;
     fromY = bounds.y + bounds.height / 2;
-  }
-
-  // Resolve "to" position
-  if (Array.isArray(annotation.to)) {
-    [toX, toY] = annotation.to;
-  } else {
-    const bounds = await getBounds(annotation.to);
-    if (!bounds) {
-      console.warn(`Arrow annotation: "to" element not found for selector "${annotation.to}"`);
-      return null;
-    }
-    toX = bounds.x + bounds.width / 2;
-    toY = bounds.y + bounds.height / 2;
   }
 
   const color = resolveColor(annotation.color);

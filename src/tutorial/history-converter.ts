@@ -32,6 +32,7 @@ export class HistoryConverter {
   private jobParamsClient: JobParamsClient;
   private formMapper: FormMapper;
   private options: HistoryConverterOptions;
+  private resolvedHistoryId?: string;
 
   constructor(options: HistoryConverterOptions) {
     this.options = options;
@@ -92,6 +93,9 @@ export class HistoryConverter {
     } else {
       throw new Error('Could not determine history ID');
     }
+    // Store for later use and set on formMapper (required for tool schema API)
+    this.resolvedHistoryId = historyId;
+    this.formMapper.setHistoryId(historyId);
     const dceMap = await this.historyClient.buildDceToCollectionMap(historyId);
     console.log(`   Mapped ${dceMap.size} collection elements`);
 
@@ -360,5 +364,12 @@ export class HistoryConverter {
    */
   getHistoryClient(): GalaxyHistoryClient {
     return this.historyClient;
+  }
+
+  /**
+   * Get job params client for external use
+   */
+  getJobParamsClient(): JobParamsClient {
+    return this.jobParamsClient;
   }
 }

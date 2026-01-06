@@ -9,6 +9,7 @@ import {
   ToolStep,
   ToolParam,
   ScreenshotStep,
+  ScreenshotAnnotation,
   DetailsBlock,
   ContentElement,
   GeneratedTutorial,
@@ -23,10 +24,12 @@ import {
 import { AIGenerator } from './ai-generator';
 import { FormMapper } from '../galaxy/form-mapper';
 import { GalaxyHistoryClient } from '../galaxy/history-client';
+import { JobParamsClient } from '../galaxy/job-params';
 
 export interface GeneratorOptions {
   formMapper?: FormMapper;
   historyClient?: GalaxyHistoryClient;
+  jobParamsClient?: JobParamsClient;
 }
 
 export class TutorialGenerator {
@@ -36,6 +39,7 @@ export class TutorialGenerator {
   private images: GeneratedImage[] = [];
   private formMapper?: FormMapper;
   private historyClient?: GalaxyHistoryClient;
+  private jobParamsClient?: JobParamsClient;
 
   constructor(config: TutorialConfig, options?: GeneratorOptions) {
     this.config = config;
@@ -43,6 +47,7 @@ export class TutorialGenerator {
     this.ai = config.ai ? new AIGenerator(config.ai) : null;
     this.formMapper = options?.formMapper;
     this.historyClient = options?.historyClient;
+    this.jobParamsClient = options?.jobParamsClient;
   }
 
   async generate(): Promise<GeneratedTutorial> {
@@ -498,7 +503,138 @@ ${this.indentBlock(parts.join('\n'), '> ')}
     // Screenshot if configured and tool was opened successfully
     if (tool.screenshot && toolOpened) {
       try {
-        const screenshotContent = await this.generateScreenshotStep(tool.screenshot);
+        // Generate annotations for non-default parameters using parameters_display
+        let screenshotWithAnnotations = { ...tool.screenshot };
+        const jobId = tool.job_params?.jobId;
+        if (jobId && this.jobParamsClient && this.formMapper) {
+          try {
+            const paramsDisplay = await this.jobParamsClient.fetchJobParametersDisplay(jobId);
+
+            // Get tool schema defaults for comparison (includes option mappings)
+            const schemaInfo = await this.getSchemaDefaultsWithOptions(tool.tool_id);
+
+            // Filter to params that differ from defaults
+            const changedParams = paramsDisplay.filter(p => {
+              // Skip section headers (null value)
+              if (p.value === null) return false;
+              // Skip "Not available." which means hidden/conditional
+              if (p.value === 'Not available.') return false;
+              // Skip empty strings
+              if (p.value === '') return false;
+              // Skip "Nothing selected" - empty optional inputs
+              if (p.value === 'Nothing selected') return false;
+              // Skip empty arrays (empty optional multi-inputs)
+              if (Array.isArray(p.value) && p.value.length === 0) return false;
+
+              // Check if this is a data input (has src field in value)
+              const isDataInput = typeof p.value === 'object' && p.value !== null &&
+                (Array.isArray(p.value) ? p.value.some((v: Record<string, unknown>) => v.src) : (p.value as Record<string, unknown>).src);
+
+              // Always show data inputs that have actual selections (user must configure these)
+              if (isDataInput) return true;
+
+              // Compare against schema default
+              const fieldInfo = schemaInfo.get(p.text);
+              if (fieldInfo) {
+                const { defaultLabel, defaultValue, options } = fieldInfo;
+
+                // Normalize values for comparison (handle string/number type differences)
+                const normalize = (v: unknown): unknown => {
+                  if (typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v)) {
+                    return parseFloat(v);
+                  }
+                  return v;
+                };
+
+                const currentNorm = normalize(p.value);
+
+                // Check if current value matches default (by label or by internal value)
+                if (options && options.length > 0 && typeof p.value === 'string') {
+                  // For select fields, check if current matches default option (by value or label)
+                  const currentMatchesDefault = options.some(opt => {
+                    const isDefaultOption = opt.label === defaultLabel || opt.value === defaultValue;
+                    const matchesCurrent = opt.value === p.value || opt.label === p.value;
+                    return isDefaultOption && matchesCurrent;
+                  });
+                  if (currentMatchesDefault) return false;
+
+                  // If no match, it's changed
+                  console.log(`    ${p.text}: changed from ${JSON.stringify(defaultLabel)} to ${JSON.stringify(p.value)}`);
+                  return true;
+                }
+
+                // Non-select field comparison
+                const defaultNorm = normalize(defaultLabel);
+                const currentStr = JSON.stringify(currentNorm);
+                const defaultStr = JSON.stringify(defaultNorm);
+                const isChanged = currentStr !== defaultStr;
+                if (isChanged) {
+                  console.log(`    ${p.text}: changed from ${defaultStr} to ${currentStr}`);
+                }
+                return isChanged;
+              }
+
+              // If no schema info found, skip common default patterns
+              if (p.value === false || p.value === true) return false;
+              // Skip small integers (likely defaults)
+              if (typeof p.value === 'number' && p.value >= 0 && p.value <= 10) {
+                return false;
+              }
+              // Skip numeric strings that look like defaults
+              if (typeof p.value === 'string' && /^[0-9]+$/.test(p.value)) {
+                const num = parseInt(p.value, 10);
+                if (num <= 10) return false;
+              }
+
+              return false; // Skip unknown params
+            });
+
+            if (changedParams.length > 0) {
+              console.log(`  Annotating ${changedParams.length} changed parameter(s)`);
+              const annotations: ScreenshotAnnotation[] = [...(tool.screenshot.annotations || [])];
+
+              for (const param of changedParams) {
+                const escapedText = param.text.replace(/"/g, '\\"');
+                // Use arrow pointing to the element from the right
+                annotations.push({
+                  type: 'arrow',
+                  from: [50, 0], // Offset from right edge of element
+                  to: `:text-is("${escapedText}")`,
+                  color: 'red',
+                } as ScreenshotAnnotation);
+              }
+
+              screenshotWithAnnotations = { ...tool.screenshot, annotations };
+
+              // Add list of changed parameters above screenshot
+              const changedList = changedParams.map(p => {
+                // Format value for display
+                let valueStr = '';
+                if (typeof p.value === 'object' && p.value !== null) {
+                  // Data input - extract name if available
+                  const val = p.value as Record<string, unknown>;
+                  if (val.name) {
+                    valueStr = String(val.name);
+                  } else if (Array.isArray(p.value) && p.value.length > 0) {
+                    const first = p.value[0] as Record<string, unknown>;
+                    valueStr = first.name ? String(first.name) : '[collection]';
+                  }
+                } else {
+                  valueStr = String(p.value);
+                }
+                return `>    - *"${p.text}"*: \`${valueStr}\``;
+              }).join('\n');
+
+              parts.push('');
+              parts.push(`> <comment-title>Key parameters to change</comment-title>\n>\n${changedList}\n{: .comment}`);
+            }
+          } catch (annotationError) {
+            console.log(`  Could not generate annotations: ${annotationError instanceof Error ? annotationError.message : annotationError}`);
+            // Continue without annotations
+          }
+        }
+
+        const screenshotContent = await this.generateScreenshotStep(screenshotWithAnnotations);
         parts.push('');
         parts.push(screenshotContent);
       } catch (error) {
@@ -513,6 +649,245 @@ ${this.indentBlock(parts.join('\n'), '> ')}
     }
 
     return parts.join('\n');
+  }
+
+  /**
+   * Get schema defaults as a map of display label -> default value
+   */
+  private async getSchemaDefaults(toolId: string): Promise<Map<string, unknown>> {
+    const defaults = new Map<string, unknown>();
+
+    if (!this.formMapper) return defaults;
+
+    try {
+      const schema = await this.formMapper.fetchToolFormSchema(toolId);
+
+      // Recursively extract defaults from schema inputs
+      const extractDefaults = (inputs: Array<{
+        name: string;
+        label?: string;
+        title?: string;
+        value?: unknown;
+        type: string;
+        options?: Array<{ value: string; label: string }>;
+        inputs?: Array<unknown>;
+        cases?: Array<{ inputs: Array<unknown> }>;
+        test_param?: { label?: string; value?: unknown; options?: Array<{ value: string; label: string }> };
+      }>) => {
+        for (const input of inputs) {
+          // Get display label
+          const label = input.title || input.label || input.name;
+
+          // Store default value - for select fields, use the option label instead of value
+          if (input.value !== undefined) {
+            let defaultToStore = input.value;
+            // For select fields with options, find the label for the default value
+            if (input.type === 'select' && typeof input.value === 'string') {
+              if (input.options && input.options.length > 0) {
+                // Galaxy options can be [{value, label}] or [[label, value, selected]]
+                const firstOpt = input.options[0];
+                if (Array.isArray(firstOpt)) {
+                  // Array format: [label, value, selected]
+                  const selectedOption = (input.options as unknown as Array<[string, string, boolean]>)
+                    .find(o => o[1] === input.value);
+                  if (selectedOption) {
+                    defaultToStore = selectedOption[0]; // label is first element
+                  }
+                } else {
+                  // Object format: {value, label}
+                  const selectedOption = input.options.find(o => o.value === input.value);
+                  if (selectedOption) {
+                    defaultToStore = selectedOption.label;
+                  }
+                }
+              }
+            }
+            defaults.set(label, defaultToStore);
+          }
+
+          // Handle conditional test_param
+          if (input.type === 'conditional' && input.test_param) {
+            const testLabel = input.test_param.label || input.name;
+            if (input.test_param.value !== undefined) {
+              let defaultToStore = input.test_param.value;
+              // For select test_params, use option label
+              if (input.test_param.options && input.test_param.options.length > 0 && typeof input.test_param.value === 'string') {
+                const firstOpt = input.test_param.options[0];
+                if (Array.isArray(firstOpt)) {
+                  // Array format: [label, value, selected]
+                  const selectedOption = (input.test_param.options as unknown as Array<[string, string, boolean]>)
+                    .find(o => o[1] === input.test_param!.value);
+                  if (selectedOption) {
+                    defaultToStore = selectedOption[0];
+                  }
+                } else {
+                  const selectedOption = input.test_param.options.find(o => o.value === input.test_param!.value);
+                  if (selectedOption) {
+                    defaultToStore = selectedOption.label;
+                  }
+                }
+              }
+              defaults.set(testLabel, defaultToStore);
+            }
+          }
+
+          // Recurse into nested inputs
+          if (input.inputs) {
+            extractDefaults(input.inputs as Array<{
+              name: string;
+              label?: string;
+              title?: string;
+              value?: unknown;
+              type: string;
+              options?: Array<{ value: string; label: string }>;
+              inputs?: Array<unknown>;
+              cases?: Array<{ inputs: Array<unknown> }>;
+              test_param?: { label?: string; value?: unknown; options?: Array<{ value: string; label: string }> };
+            }>);
+          }
+
+          // Recurse into conditional cases
+          if (input.cases) {
+            for (const caseItem of input.cases) {
+              extractDefaults(caseItem.inputs as Array<{
+                name: string;
+                label?: string;
+                title?: string;
+                value?: unknown;
+                type: string;
+                options?: Array<{ value: string; label: string }>;
+                inputs?: Array<unknown>;
+                cases?: Array<{ inputs: Array<unknown> }>;
+                test_param?: { label?: string; value?: unknown; options?: Array<{ value: string; label: string }> };
+              }>);
+            }
+          }
+        }
+      };
+
+      extractDefaults(schema.inputs as Array<{
+        name: string;
+        label?: string;
+        title?: string;
+        value?: unknown;
+        type: string;
+        options?: Array<{ value: string; label: string }>;
+        inputs?: Array<unknown>;
+        cases?: Array<{ inputs: Array<unknown> }>;
+        test_param?: { label?: string; value?: unknown; options?: Array<{ value: string; label: string }> };
+      }>);
+    } catch (error) {
+      console.warn(`Could not fetch schema defaults for ${toolId}`);
+    }
+
+    return defaults;
+  }
+
+  /**
+   * Get schema defaults with full option information for accurate comparison
+   */
+  private async getSchemaDefaultsWithOptions(toolId: string): Promise<Map<string, {
+    defaultLabel: unknown;
+    defaultValue: unknown;
+    options: Array<{ value: string; label: string }> | null;
+  }>> {
+    const result = new Map<string, {
+      defaultLabel: unknown;
+      defaultValue: unknown;
+      options: Array<{ value: string; label: string }> | null;
+    }>();
+
+    if (!this.formMapper) return result;
+
+    try {
+      const schema = await this.formMapper.fetchToolFormSchema(toolId);
+
+      type InputType = {
+        name: string;
+        label?: string;
+        title?: string;
+        value?: unknown;
+        type: string;
+        options?: Array<{ value: string; label: string }> | Array<[string, string, boolean]>;
+        inputs?: Array<unknown>;
+        cases?: Array<{ inputs: Array<unknown> }>;
+        test_param?: {
+          label?: string;
+          value?: unknown;
+          options?: Array<{ value: string; label: string }> | Array<[string, string, boolean]>;
+        };
+      };
+
+      // Helper to normalize Galaxy's two option formats
+      const normalizeOptions = (opts: Array<{ value: string; label: string }> | Array<[string, string, boolean]> | undefined): Array<{ value: string; label: string }> | null => {
+        if (!opts || opts.length === 0) return null;
+        if (Array.isArray(opts[0])) {
+          // Array format: [label, value, selected]
+          return (opts as Array<[string, string, boolean]>).map(o => ({ label: o[0], value: o[1] }));
+        }
+        return opts as Array<{ value: string; label: string }>;
+      };
+
+      const extractDefaults = (inputs: InputType[]) => {
+        for (const input of inputs) {
+          const fieldLabel = input.title || input.label || input.name;
+          const options = normalizeOptions(input.options);
+
+          if (input.value !== undefined) {
+            let defaultLabel = input.value;
+            const defaultValue = input.value;
+
+            // For select fields, find the label for the default value
+            if (input.type === 'select' && options && typeof input.value === 'string') {
+              const selectedOption = options.find(o => o.value === input.value);
+              if (selectedOption) {
+                defaultLabel = selectedOption.label;
+              }
+            }
+
+            result.set(fieldLabel, { defaultLabel, defaultValue, options });
+          }
+
+          // Handle conditional test_param
+          if (input.type === 'conditional' && input.test_param) {
+            const testLabel = input.test_param.label || input.name;
+            const testOptions = normalizeOptions(input.test_param.options);
+
+            if (input.test_param.value !== undefined) {
+              let defaultLabel = input.test_param.value;
+              const defaultValue = input.test_param.value;
+
+              if (testOptions && typeof input.test_param.value === 'string') {
+                const selectedOption = testOptions.find(o => o.value === input.test_param!.value);
+                if (selectedOption) {
+                  defaultLabel = selectedOption.label;
+                }
+              }
+
+              result.set(testLabel, { defaultLabel, defaultValue, options: testOptions });
+            }
+          }
+
+          // Recurse into nested inputs
+          if (input.inputs) {
+            extractDefaults(input.inputs as InputType[]);
+          }
+
+          // Recurse into conditional cases
+          if (input.cases) {
+            for (const caseItem of input.cases) {
+              extractDefaults(caseItem.inputs as InputType[]);
+            }
+          }
+        }
+      };
+
+      extractDefaults(schema.inputs as InputType[]);
+    } catch (error) {
+      console.warn(`Could not fetch schema defaults for ${toolId}`);
+    }
+
+    return result;
   }
 
   private formatToolParam(param: ToolParam, indent: number): string {

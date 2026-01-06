@@ -121,6 +121,7 @@ async function runFromHistory(options: {
     const generator = new TutorialGenerator(config, {
       formMapper: converter.getFormMapper(),
       historyClient: converter.getHistoryClient(),
+      jobParamsClient: converter.getJobParamsClient(),
     });
     await generator.save();
 

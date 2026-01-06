@@ -300,6 +300,41 @@ export class JobParamsClient {
   }
 
   /**
+   * Flattened parameter from parameters_display API
+   */
+  /**
+   * Fetch flattened parameters_display from job API
+   * Returns human-readable labels with actual values
+   */
+  async fetchJobParametersDisplay(jobId: string): Promise<Array<{
+    text: string;      // Human-readable label
+    depth: number;     // Nesting level
+    value: unknown;    // Actual value
+    notes: string | null;
+  }>> {
+    const response = await fetch(`${this.galaxyUrl}/api/jobs/${jobId}/parameters_display`, {
+      headers: {
+        'x-api-key': this.apiKey,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`Failed to fetch job parameters_display for ${jobId}: ${response.status}`);
+      return [];
+    }
+
+    const data = await response.json() as { parameters: Array<{
+      text: string;
+      depth: number;
+      value: unknown;
+      notes: string | null;
+    }> };
+
+    return data.parameters || [];
+  }
+
+  /**
    * Fetch params for multiple jobs in batches
    */
   async fetchAllJobParams(jobIds: string[], batchSize = 5): Promise<JobFullParams[]> {
